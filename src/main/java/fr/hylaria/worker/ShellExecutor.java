@@ -20,7 +20,7 @@ public class ShellExecutor {
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                System.err.println("⚠️ Command failed: " + command);
+                System.err.println("Command failed: " + command);
             }
         } catch (Exception e) {
             e.printStackTrace();

@@ -33,7 +33,6 @@ public class DeployNetworkWorker implements Runnable {
                     String templateDir = "/opt/infra/deployments";
                     String genDir = "/tmp/k3s-gen";
 
-                    // Vérifier si déjà en base
                     String checkQuery = String.format(
                             "SELECT COUNT(*) FROM servers WHERE server_name = '%s'", name
                     );
@@ -44,7 +43,7 @@ public class DeployNetworkWorker implements Runnable {
                         var rs = check.executeQuery();
 
                         if (!rs.next() || rs.getInt(1) > 0) {
-                            System.out.println("❌ Velocity existe déjà. Annulation.");
+                            System.out.println("Velocity existe déjà. Annulation.");
                             channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                             return;
                         }
@@ -52,7 +51,6 @@ public class DeployNetworkWorker implements Runnable {
                     }
 
 
-                    // Génération YAML
                     ShellExecutor.run("mkdir -p " + genDir);
                     for (String suffix : new String[]{"pvc-template.yaml", "deployment-template.yaml", "service-template.yaml"}) {
                         String input = String.format("%s/velocity-%s", templateDir, suffix);
@@ -60,19 +58,15 @@ public class DeployNetworkWorker implements Runnable {
                         ShellExecutor.run(String.format("sed 's/__SERVER_NAME__/%s/g' %s > %s", name, input, output));
                     }
 
-                    // Déploiement
                     ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-pvc-template.yaml");
                     ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-deployment-template.yaml");
                     ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-service-template.yaml");
 
-                    // Attente disponibilité pod
                     ShellExecutor.run("kubectl wait --for=condition=Ready pod -l app=" + name + " --timeout=90s");
 
-                    // Récupération IP
                     String podIp = ShellExecutor.runAndGet("kubectl get pod -l app=" + name + " -o jsonpath='{.items[0].status.podIP}'").trim();
                     if (podIp.isEmpty()) throw new RuntimeException("IP de Velocity introuvable");
 
-                    // Insertion en base
                     try (Connection conn = DriverManager.getConnection("jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
                          PreparedStatement insert = conn.prepareStatement(
                                  "INSERT INTO servers (server_name, k3s_server_name, ip, port, max_slots, available_slots, status, server_type, created_at) " +
