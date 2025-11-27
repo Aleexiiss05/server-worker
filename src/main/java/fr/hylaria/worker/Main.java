@@ -2,7 +2,7 @@ package fr.hylaria.worker;
 
 public class Main {
     public static void main(String[] args) throws Exception {
-        RabbitMQManager.connect("localhost");
+        RabbitMQManager.connectWithRetry();
         System.out.println("DeployWorker lancé...");
         new Thread(new DeployNetworkWorker()).start();
         new Thread(new DeployWorker()).start();

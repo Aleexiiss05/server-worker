@@ -1,15 +1,15 @@
 package fr.hylaria.worker;
 
 import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.DeliverCallback;
 import org.json.JSONObject;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
-import java.util.Objects;
 
 public class DeployNetworkWorker implements Runnable {
+
+    private static final String KUBECTL = "kubectl";
 
     @Override
     public void run() {
@@ -30,63 +30,88 @@ public class DeployNetworkWorker implements Runnable {
 
                     String name = "velocity";
                     int port = 25565;
+
                     String templateDir = "/opt/infra/deployments";
                     String genDir = "/tmp/k3s-gen";
 
-                    String checkQuery = String.format(
-                            "SELECT COUNT(*) FROM servers WHERE server_name = '%s'", name
-                    );
-                    try (Connection conn = DriverManager.getConnection("jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
-                         PreparedStatement check = conn.prepareStatement("SELECT COUNT(*) FROM servers WHERE server_name = ?")) {
+                    // Vérifier si Velocity existe déjà
+                    try (Connection conn = DriverManager.getConnection(
+                            "jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
+                         PreparedStatement check = conn.prepareStatement(
+                                 "SELECT COUNT(*) FROM servers WHERE server_name = ?")) {
 
                         check.setString(1, name);
                         var rs = check.executeQuery();
 
-                        if (!rs.next() || rs.getInt(1) > 0) {
+                        if (rs.next() && rs.getInt(1) > 0) {
                             System.out.println("Velocity existe déjà. Annulation.");
                             channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                             return;
                         }
-
                     }
-
 
                     ShellExecutor.run("mkdir -p " + genDir);
-                    for (String suffix : new String[]{"pvc-template.yaml", "deployment-template.yaml", "service-template.yaml"}) {
-                        String input = String.format("%s/velocity-%s", templateDir, suffix);
-                        String output = String.format("%s/velocity-%s", genDir, suffix);
-                        ShellExecutor.run(String.format("sed 's/__SERVER_NAME__/%s/g' %s > %s", name, input, output));
+
+                    // Génération des fichiers YAML
+                    for (String suffix :
+                            new String[]{"pvc-template.yaml", "deployment-template.yaml", "service-template.yaml"}) {
+
+                        String tpl = templateDir + "/velocity-" + suffix;
+                        String out = genDir + "/velocity-" + suffix;
+
+                        ShellExecutor.run(
+                                "sed 's/__SERVER_NAME__/" + name + "/g' " + tpl + " > " + out
+                        );
                     }
 
-                    ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-pvc-template.yaml");
-                    ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-deployment-template.yaml");
-                    ShellExecutor.run("kubectl apply -f " + genDir + "/velocity-service-template.yaml");
+                    // Apply
+                    ShellExecutor.run(
+                            KUBECTL + " apply -f " + genDir
+                    );
 
-                    ShellExecutor.run("kubectl wait --for=condition=Ready pod -l app=" + name + " --timeout=90s");
+                    // Wait ready
+                    ShellExecutor.run(
+                            KUBECTL + " wait --for=condition=Ready pod -l app=" + name + " --timeout=90s"
+                    );
 
-                    String podIp = ShellExecutor.runAndGet("kubectl get pod -l app=" + name + " -o jsonpath='{.items[0].status.podIP}'").trim();
-                    if (podIp.isEmpty()) throw new RuntimeException("IP de Velocity introuvable");
+                    // Récupérer IP du pod
+                    String podIp = ShellExecutor.runAndGet(
+                            KUBECTL + " get pod -l app=" + name +
+                                    " -o jsonpath='{.items[0].status.podIP}'"
+                    ).trim();
 
-                    try (Connection conn = DriverManager.getConnection("jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
+                    if (podIp.isEmpty())
+                        throw new RuntimeException("IP Velocity introuvable");
+
+                    String podName = ShellExecutor.runAndGet(
+                            KUBECTL + " get pod -l app=" + name +
+                                    " -o jsonpath='{.items[0].metadata.name}'"
+                    ).trim();
+
+                    // Insérer en BDD
+                    try (Connection conn = DriverManager.getConnection(
+                            "jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
                          PreparedStatement insert = conn.prepareStatement(
-                                 "INSERT INTO servers (server_name, k3s_server_name, ip, port, max_slots, available_slots, status, server_type, created_at) " +
-                                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())")) {
+                                 "INSERT INTO servers " +
+                                         "(server_name, server_type, port, max_slots, available_slots, status, restricted, ip, k3s_server_name, created_at) " +
+                                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())")) {
 
                         insert.setString(1, name);
-                        insert.setString(2, name);
-                        insert.setString(3, podIp);
-                        insert.setInt(4, port);
+                        insert.setString(2, "PROXY");
+                        insert.setInt(3, port);
+                        insert.setInt(4, 100);
                         insert.setInt(5, 100);
-                        insert.setInt(6, 100);
-                        insert.setString(7, "ONLINE");
-                        insert.setString(8, "PROXY");
+                        insert.setString(6, "ONLINE");
+                        insert.setBoolean(7, false);
+                        insert.setString(8, podIp);
+                        insert.setString(9, podName);
 
                         insert.executeUpdate();
                     }
 
-                    System.out.println("[Deploy-Network] ✅ Velocity déployé et enregistré");
-
+                    System.out.println("[Deploy-Network] ✅ Velocity déployé et enregistré.");
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+
                 } catch (Exception e) {
                     e.printStackTrace();
                     channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
