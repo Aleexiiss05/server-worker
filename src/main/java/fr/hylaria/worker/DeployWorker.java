@@ -12,7 +12,6 @@ import java.util.concurrent.ScheduledExecutorService;
 
 public class DeployWorker implements Runnable {
 
-    // ✔️ kubectl utilise automatiquement /root/.kube/config
     private static final String KUBECTL = "kubectl";
 
     private int findAvailablePort(String host, String dbName, String user, String pass) {
