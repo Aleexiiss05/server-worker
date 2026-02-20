@@ -1,0 +1,13 @@
+rush:
+  "1v1":
+    min_players: 2
+    max_players: 2
+  "2v2":
+    min_players: 4
+    max_players: 4
+  "4v4":
+    min_players: 8
+    max_players: 8
+  "5v5":
+    min_players: 10
+    max_players: 10

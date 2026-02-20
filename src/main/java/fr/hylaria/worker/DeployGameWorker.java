@@ -11,12 +11,11 @@ import java.util.*;
 
 import java.util.concurrent.ScheduledExecutorService;
 
-public class DeployWorker implements Runnable {
+public class DeployGameWorker implements Runnable {
 
     private static final String KUBECTL = "kubectl";
     private static HikariDataSource dataSource;
 
-    // INITIALISATION HIKARI
     private void initPool(String host, String dbName, String user, String pass) {
         if (dataSource != null) return;
 
@@ -32,17 +31,13 @@ public class DeployWorker implements Runnable {
         config.setMaxLifetime(120000);
 
         dataSource = new HikariDataSource(config);
-        System.out.println("[MySQL] Pool Hikari initialisé");
+        System.out.println("[MySQL] Pool Hikari initialisé pour GameWorker");
     }
 
-    // GET CONNECTION
     private Connection getConn() throws Exception {
         return dataSource.getConnection();
     }
 
-    // ─────────────────────────────────────────────────────────
-    // PORT SCAN OPTIMISÉ (1 requête SQL au lieu de 41)
-    // ─────────────────────────────────────────────────────────
     private int findAvailablePort(String host, String dbName, String user, String pass) {
         initPool(host, dbName, user, pass);
 
@@ -50,30 +45,26 @@ public class DeployWorker implements Runnable {
         final int END = 25620;
 
         try (Connection conn = getConn()) {
-
-            // 1) On récupère tous les ports utilisés en BDD
             Set<Integer> usedPortsDB = new HashSet<>();
+            // We still check servers to avoid collision with normal servers
             ResultSet rs = conn.prepareStatement("SELECT port FROM servers").executeQuery();
             while (rs.next()) usedPortsDB.add(rs.getInt(1));
 
-            // 2) On récupère les ports utilisés dans Kubernetes
             String result = ShellExecutor.runAndGet(
                     KUBECTL + " get pods -o jsonpath='{.items[*].spec.containers[*].ports[*].containerPort}'"
             );
 
             Set<String> usedK3SPorts = new HashSet<>(Arrays.asList(result.split(" ")));
 
-            // 3) On cherche le premier port libre
             for (int port = START; port <= END; port++) {
                 boolean usedInDB = usedPortsDB.contains(port);
                 boolean usedInK3s = usedK3SPorts.contains(String.valueOf(port));
 
                 if (!usedInDB && !usedInK3s) {
-                    System.out.println("[PORT] Port disponible trouvé : " + port);
+                    System.out.println("[PORT] Port disponible trouvé pour game : " + port);
                     return port;
                 }
             }
-
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -81,75 +72,76 @@ public class DeployWorker implements Runnable {
         throw new RuntimeException("Aucun port disponible entre " + START + " et " + END);
     }
 
-    // ─────────────────────────────────────────────────────────
-    // MAIN CONSUMER
-    // ─────────────────────────────────────────────────────────
-
     @Override
     public void run() {
         try {
             Channel channel = RabbitMQManager.createChannel();
-            channel.queueDeclare("deploy-server", true, false, false, null);
+            channel.queueDeclare("deploy-game", true, false, false, null);
 
-            channel.basicConsume("deploy-server", false, (consumerTag, delivery) -> {
+            channel.basicConsume("deploy-game", false, (consumerTag, delivery) -> {
                 try {
                     String msg = new String(delivery.getBody(), "UTF-8");
                     JSONObject data = new JSONObject(msg);
-                    System.out.println("[Deploy] Reçu : " + data);
+                    System.out.println("[DeployGame] Reçu : " + data);
 
                     String dbHost = data.getString("dbHost");
                     String dbName = data.getString("dbName");
                     String dbUser = data.getString("dbUser");
                     String dbPass = data.getString("dbPass");
-                    String serverType = data.getString("serverType");
-                    boolean isRestricted = data.optBoolean("restricted", false);
+                    String gameType = data.getString("gameType");
+                    String mode = data.getString("mode");
 
                     initPool(dbHost, dbName, dbUser, dbPass);
 
-                    // ─── Nom serveur ───
-                    String serverName = serverType.equalsIgnoreCase("hub")
-                            ? "hub-" + (1000 + new Random().nextInt(9000))
-                            : serverType.toLowerCase() + "-" + (1000 + new Random().nextInt(9000));
-
-                    // ─── Port ───
+                    String serverName = gameType.toLowerCase() + "-" + mode.toLowerCase() + "-" + (1000 + new Random().nextInt(9000));
                     int port = findAvailablePort(dbHost, dbName, dbUser, dbPass);
 
-                    // ─── Insert LOADING en base ───
+                    int minPlayers = GameDefaultConfig.getMinPlayers(gameType, mode);
+                    int maxPlayers = GameDefaultConfig.getMaxPlayers(gameType, mode);
+
+                    // Insert LOADING en base dans la table games et servers
                     try (Connection conn = getConn();
                          PreparedStatement stmt = conn.prepareStatement(
+                                 "INSERT INTO games (server_name, game_type, mode, map_name, state, min_players, max_players, current_players, started_at, queue) " +
+                                         "VALUES (?, ?, ?, 'random', 'LOADING', ?, ?, 0, NOW(), 'none')"
+                         );
+                         PreparedStatement stmtServers = conn.prepareStatement(
                                  "INSERT INTO servers (server_name, port, max_slots, available_slots, status, server_type, restricted, created_at) " +
-                                         "VALUES (?, ?, 0, 0, 'LOADING', ?, ?, NOW())"
+                                         "VALUES (?, ?, 0, 0, 'LOADING', ?, false, NOW())"
                          )) {
+                        // games
                         stmt.setString(1, serverName);
-                        stmt.setInt(2, port);
-                        stmt.setString(3, serverType);
-                        stmt.setBoolean(4, isRestricted);
+                        stmt.setString(2, gameType);
+                        stmt.setString(3, mode);
+                        stmt.setInt(4, minPlayers);
+                        stmt.setInt(5, maxPlayers);
                         stmt.executeUpdate();
+
+                        // servers
+                        stmtServers.setString(1, serverName);
+                        stmtServers.setInt(2, port);
+                        stmtServers.setString(3, gameType);
+                        stmtServers.executeUpdate();
                     }
 
-                    // ─── Génération YAML ───
+                    // Génération YAML (On utilise les templates game)
                     String templateDir = "/opt/infra/deployments";
-                    String genDir = "/tmp/k3s-gen";
+                    String genDir = "/tmp/k3s-gen-games";
                     new java.io.File(genDir).mkdirs();
 
-                    String prefix = serverType.equalsIgnoreCase("hub") ? "hub" : "game";
-
                     for (String suffix : new String[]{"pvc-template.yaml", "deployment-template.yaml"}) {
-                        String templatePath = templateDir + "/" + prefix + "-" + suffix;
+                        String templatePath = templateDir + "/game-" + suffix;
                         String targetPath = genDir + "/" + serverName + "-" + suffix;
 
-                        String sedCommand = serverType.equalsIgnoreCase("hub")
-                                ? String.format("sed 's/__SERVER_NAME__/%s/g; s/__SERVER_PORT__/%d/g' %s > %s",
-                                serverName, port, templatePath, targetPath)
-                                : String.format("sed 's/__SERVER_NAME__/%s/g; s/__SERVER_PORT__/%d/g; s/__GAME_TYPE__/%s/g' %s > %s",
-                                serverName, port, serverType, templatePath, targetPath);
+                        String sedCommand = String.format("sed 's/__SERVER_NAME__/%s/g; s/__SERVER_PORT__/%d/g; s/__GAME_TYPE__/%s/g; s/__MODE__/%s/g' %s > %s",
+                                serverName, port, gameType, mode, templatePath, targetPath);
 
                         ShellExecutor.run(sedCommand);
                     }
 
-                    // ─── Déploiement ───
+                    // Déploiement
                     ShellExecutor.run(KUBECTL + " apply -f " + genDir);
-                    System.out.println("[Deploy] YAML appliqué.");
+                    System.out.println("[DeployGame] YAML appliqué pour " + serverName);
 
                     ShellExecutor.run(
                             KUBECTL + " wait --for=condition=Ready pod -l app=" + serverName + " --timeout=60s"
@@ -163,10 +155,10 @@ public class DeployWorker implements Runnable {
                             KUBECTL + " get pod -l app=" + serverName + " -o jsonpath='{.items[0].metadata.name}'"
                     ).trim();
 
-                    // ─── Nettoyage YAML ───
+                    // Nettoyage YAML
                     ShellExecutor.run("rm -f " + genDir + "/" + serverName + "-*.yaml");
 
-                    // ─── Velocity ───
+                    // Velocity
                     ShellExecutor.run(
                             KUBECTL + " wait --for=condition=Ready pod -l app=velocity --timeout=60s"
                     );
@@ -177,33 +169,39 @@ public class DeployWorker implements Runnable {
 
                     String curl = String.format(
                             "curl -X POST http://%s:8081/add-server -H 'Content-Type: application/json' " +
-                                    "-d '{\"name\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"type\":\"%s\",\"restricted\":%s}'",
-                            velocityIp, serverName, podIp, port, serverType, isRestricted);
+                                    "-d '{\"name\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"type\":\"%s\",\"restricted\":false}'",
+                            velocityIp, serverName, podIp, port, gameType);
 
                     ShellExecutor.run(curl);
 
-                    // ─── UPDATE DB final ───
+                    // ─── UPDATE DB final pour servers ───
                     try (Connection conn = getConn();
-                         PreparedStatement update = conn.prepareStatement(
-                                 "UPDATE servers SET k3s_server_name = ?, ip = ?, max_slots = 100, available_slots = 100, status = 'LOADING', restricted = ? WHERE server_name = ?")) {
+                         PreparedStatement updateServers = conn.prepareStatement(
+                                 "UPDATE servers SET k3s_server_name = ?, ip = ?, max_slots = ?, available_slots = ?, status = 'LOADING', restricted = false WHERE server_name = ?")) {
 
-                        update.setString(1, podName);
-                        update.setString(2, podIp);
-                        update.setBoolean(3, isRestricted);
-                        update.setString(4, serverName);
-                        update.executeUpdate();
+                        updateServers.setString(1, podName);
+                        updateServers.setString(2, podIp);
+                        updateServers.setInt(3, maxPlayers);
+                        updateServers.setInt(4, maxPlayers);
+                        updateServers.setString(5, serverName);
+                        updateServers.executeUpdate();
                     }
 
-                    // ─── Transition LOADING → ONLINE ───
+                    // Transition LOADING → ONLINE pour games et servers
                     ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
                     scheduler.schedule(() -> {
                         try (Connection conn = getConn();
-                             PreparedStatement update = conn.prepareStatement(
+                             PreparedStatement updateGames = conn.prepareStatement(
+                                     "UPDATE games SET state = 'WAITING' WHERE server_name = ?");
+                             PreparedStatement updateServers = conn.prepareStatement(
                                      "UPDATE servers SET status = 'ONLINE' WHERE server_name = ?")) {
 
-                            update.setString(1, serverName);
-                            update.executeUpdate();
-                            System.out.println("[Deploy] Serveur " + serverName + " ONLINE.");
+                            updateGames.setString(1, serverName);
+                            updateGames.executeUpdate();
+
+                            updateServers.setString(1, serverName);
+                            updateServers.executeUpdate();
+                            System.out.println("[DeployGame] Game " + serverName + " WAITING & ONLINE in servers.");
                         } catch (Exception e) {
                             e.printStackTrace();
                         }

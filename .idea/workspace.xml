@@ -4,11 +4,26 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e0add89b-e4be-472f-b19a-6d629c655a1b" name="Changes" comment="Resolving problems with K3S" />
+    <list default="true" id="e0add89b-e4be-472f-b19a-6d629c655a1b" name="Changes" comment="Resolving problems with K3S">
+      <change afterPath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/MySQLPool.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/DeployNetworkWorker.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/DeployNetworkWorker.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/DeployWorker.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/DeployWorker.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/RemoveNetworkWorker.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/RemoveNetworkWorker.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/RemoveWorker.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/fr/hylaria/worker/RemoveWorker.java" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Class" />
+      </list>
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -22,7 +37,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;https://github.com/Aleexiiss05/server-worker.git&quot;,
-    &quot;accountId&quot;: &quot;c8ca19a4-957e-4c9e-9898-60b9fc9455c4&quot;
+    &quot;accountId&quot;: &quot;61c8fbe0-7410-4a8b-9438-a67db8ee7200&quot;
   }
 }</component>
   <component name="ProjectColorInfo">{
@@ -33,49 +48,42 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;Maven.server-worker [clean,install].executor&quot;: &quot;Run&quot;,
-    &quot;Maven.server-worker [org.apache.maven.plugins:maven-clean-plugin:3.2.0:clean].executor&quot;: &quot;Run&quot;,
-    &quot;Maven.server-worker [org.apache.maven.plugins:maven-deploy-plugin:3.1.2:deploy].executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;Modules&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.18359375&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.0&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "Maven.server-worker [clean,install].executor": "Run",
+    "Maven.server-worker [clean,package].executor": "Run",
+    "Maven.server-worker [org.apache.maven.plugins:maven-clean-plugin:3.2.0:clean].executor": "Run",
+    "Maven.server-worker [org.apache.maven.plugins:maven-deploy-plugin:3.1.2:deploy].executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "git-widget-placeholder": "main",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "C:/Users/haale/IdeaProjects/server-worker",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "Modules",
+    "project.structure.proportion": "0.18359375",
+    "project.structure.side.proportion": "0.0",
+    "settings.editor.selected.configurable": "project.propVCSSupport.Mappings",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RunAnythingCache">
     <option name="myCommands">
+      <command value="mvn clean package" />
       <command value="mvn clean install" />
     </option>
-  </component>
-  <component name="RunManager">
-    <configuration default="true" type="JetRunConfigurationType">
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <configuration default="true" type="KotlinStandaloneScriptRunConfigurationType">
-      <option name="filePath" />
-      <method v="2" />
-    </configuration>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-jdk-9823dce3aa75-bf35d07a577b-intellij.indexing.shared.core-IU-252.27397.103" />
-        <option value="bundled-js-predefined-d6986cc7102b-3aa1da707db6-JavaScript-IU-252.27397.103" />
+        <option value="bundled-jdk-30f59d01ecdd-2fc7cc6b9a17-intellij.indexing.shared.core-IU-253.30387.90" />
       </set>
     </attachedChunks>
   </component>
@@ -94,6 +102,11 @@
       <workItem from="1764154944890" duration="2443000" />
       <workItem from="1764182088292" duration="2837000" />
       <workItem from="1764243699960" duration="2491000" />
+      <workItem from="1764247833866" duration="412000" />
+      <workItem from="1764266362500" duration="1864000" />
+      <workItem from="1764685186648" duration="73000" />
+      <workItem from="1764693803791" duration="2165000" />
+      <workItem from="1764783513882" duration="62000" />
     </task>
     <task id="LOCAL-00001" summary="Adding files">
       <option name="closed" value="true" />
@@ -127,7 +140,23 @@
       <option name="project" value="LOCAL" />
       <updated>1764247782324</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="Resolving problems with K3S">
+      <option name="closed" value="true" />
+      <created>1764247871260</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1764247871260</updated>
+    </task>
+    <task id="LOCAL-00006" summary="Resolving problems with K3S">
+      <option name="closed" value="true" />
+      <created>1764248072593</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1764248072593</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

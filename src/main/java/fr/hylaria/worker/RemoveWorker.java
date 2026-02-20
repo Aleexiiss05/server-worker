@@ -1,15 +1,14 @@
 package fr.hylaria.worker;
 
-import com.rabbitmq.client.*;
+import com.rabbitmq.client.Channel;
 import org.json.JSONObject;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.util.concurrent.*;
 
 public class RemoveWorker implements Runnable {
+
+    private static final String KUBECTL = "kubectl";
 
     @Override
     public void run() {
@@ -19,74 +18,58 @@ public class RemoveWorker implements Runnable {
 
             channel.basicConsume("remove-server", false, (consumerTag, delivery) -> {
                 try {
+
                     String msg = new String(delivery.getBody(), "UTF-8");
                     JSONObject data = new JSONObject(msg);
-                    System.out.println("[Remove] 📩 Reçu : " + data);
 
                     String dbHost = data.getString("dbHost");
                     String dbName = data.getString("dbName");
                     String dbUser = data.getString("dbUser");
                     String dbPass = data.getString("dbPass");
-                    String serverName = data.getString("serverName");
+                    String name = data.getString("serverName");
 
-                    try (Connection conn = DriverManager.getConnection("jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
-                         PreparedStatement update = conn.prepareStatement(
-                                 "UPDATE servers SET status = 'MAINTENANCE' WHERE server_name = ?")) {
-                        update.setString(1, serverName);
-                        update.executeUpdate();
-                        System.out.println("[Remove] " + serverName + " passé en MAINTENANCE");
+                    MySQLPool.init(dbHost, dbName, dbUser, dbPass);
+
+                    // MAINTENANCE
+                    try (Connection conn = MySQLPool.get();
+                         PreparedStatement stmt = conn.prepareStatement(
+                                 "UPDATE servers SET status='MAINTENANCE' WHERE server_name=?")) {
+                        stmt.setString(1, name);
+                        stmt.executeUpdate();
                     }
 
-                    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-                    scheduler.schedule(() -> {
-                        try {
-                            System.out.println("[Remove] Suppression du serveur : " + serverName);
+                    // DELETE DEPLOYMENT
+                    ShellExecutor.run(KUBECTL + " delete deployment " + name);
+                    ShellExecutor.run(KUBECTL + " delete pvc " + name + "-pvc");
 
-                            ShellExecutor.run("kubectl delete deployment " + serverName);
-                            ShellExecutor.run("kubectl delete pvc " + serverName + "-pvc");
+                    // REMOVE FROM VELOCITY
+                    String velocityIp = ShellExecutor.runAndGet(
+                            KUBECTL + " get pod -l app=velocity -o jsonpath='{.items[0].status.podIP}'"
+                    ).trim();
 
-                            String velocityIp = ShellExecutor.runAndGet(
-                                    "kubectl get pod -l app=velocity -o jsonpath={.items[0].status.podIP}"
-                            ).trim();
+                    if (!velocityIp.isEmpty()) {
+                        ShellExecutor.run(
+                                "curl -X POST http://" + velocityIp + ":8081/remove-server?name=" + name
+                        );
+                    }
 
-                            if (velocityIp.isEmpty()) {
-                                System.err.println("[Remove] Impossible de trouver l’IP du pod Velocity");
-                            } else {
-                                String curl = String.format(
-                                        "curl -X POST http://%s:8081/remove-server?name=%s",
-                                        velocityIp, serverName
-                                );
-                                ShellExecutor.run(curl);
-                                System.out.println("[Remove] 🔄 Notifié Velocity de la suppression");
-                            }
-
-                            try (Connection conn = DriverManager.getConnection("jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
-                                 PreparedStatement delete = conn.prepareStatement(
-                                         "DELETE FROM servers WHERE server_name = ?")) {
-                                delete.setString(1, serverName);
-                                delete.executeUpdate();
-                                System.out.println("[Remove] Serveur " + serverName + " supprimé de la base");
-                            }
-
-                        } catch (Exception e) {
-                            System.err.println("[Remove] Erreur pendant la suppression du serveur " + serverName);
-                            e.printStackTrace();
-                        } finally {
-                            scheduler.shutdown();
-                        }
-                    }, 5, TimeUnit.SECONDS);
+                    // DELETE SQL
+                    try (Connection conn = MySQLPool.get();
+                         PreparedStatement stmt = conn.prepareStatement(
+                                 "DELETE FROM servers WHERE server_name=?")) {
+                        stmt.setString(1, name);
+                        stmt.executeUpdate();
+                    }
 
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
 
                 } catch (Exception e) {
-                    System.err.println("[Remove] Erreur dans le traitement du message RabbitMQ");
                     e.printStackTrace();
                     channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
                 }
 
             }, consumerTag -> {});
         } catch (Exception e) {
-            System.err.println("[Remove] Erreur d'initialisation du worker");
             e.printStackTrace();
         }
     }

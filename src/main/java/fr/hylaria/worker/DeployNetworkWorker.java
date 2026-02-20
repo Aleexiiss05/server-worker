@@ -4,7 +4,6 @@ import com.rabbitmq.client.Channel;
 import org.json.JSONObject;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 
 public class DeployNetworkWorker implements Runnable {
@@ -28,34 +27,35 @@ public class DeployNetworkWorker implements Runnable {
                     String dbUser = data.getString("dbUser");
                     String dbPass = data.getString("dbPass");
 
+                    MySQLPool.init(dbHost, dbName, dbUser, dbPass);
+
                     String name = "velocity";
                     int port = 25565;
 
-                    String templateDir = "/opt/infra/deployments";
-                    String genDir = "/tmp/k3s-gen";
-
-                    // Vérifier si Velocity existe déjà
-                    try (Connection conn = DriverManager.getConnection(
-                            "jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
+                    // Vérifier existence
+                    try (Connection conn = MySQLPool.get();
                          PreparedStatement check = conn.prepareStatement(
-                                 "SELECT COUNT(*) FROM servers WHERE server_name = ?")) {
+                                 "SELECT COUNT(*) FROM servers WHERE server_name=?")) {
 
                         check.setString(1, name);
                         var rs = check.executeQuery();
 
                         if (rs.next() && rs.getInt(1) > 0) {
-                            System.out.println("Velocity existe déjà. Annulation.");
+                            System.out.println("[Deploy-Network] ❌ Velocity existe déjà.");
                             channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                             return;
                         }
                     }
 
+                    String genDir = "/tmp/k3s-gen";
+                    String templateDir = "/opt/infra/deployments";
+
                     ShellExecutor.run("mkdir -p " + genDir);
 
-                    // Génération des fichiers YAML
-                    for (String suffix :
-                            new String[]{"pvc-template.yaml", "deployment-template.yaml", "service-template.yaml"}) {
-
+                    // Génération YAML
+                    for (String suffix : new String[] {
+                            "pvc-template.yaml", "deployment-template.yaml", "service-template.yaml"
+                    }) {
                         String tpl = templateDir + "/velocity-" + suffix;
                         String out = genDir + "/velocity-" + suffix;
 
@@ -65,57 +65,43 @@ public class DeployNetworkWorker implements Runnable {
                     }
 
                     // Apply
-                    ShellExecutor.run(
-                            KUBECTL + " apply -f " + genDir
-                    );
+                    ShellExecutor.run(KUBECTL + " apply -f " + genDir);
 
                     // Wait ready
-                    ShellExecutor.run(
-                            KUBECTL + " wait --for=condition=Ready pod -l app=" + name + " --timeout=90s"
-                    );
+                    ShellExecutor.run(KUBECTL + " wait --for=condition=Ready pod -l app=velocity --timeout=120s");
 
-                    // Récupérer IP du pod
+                    // IP & name
                     String podIp = ShellExecutor.runAndGet(
-                            KUBECTL + " get pod -l app=" + name +
-                                    " -o jsonpath='{.items[0].status.podIP}'"
+                            KUBECTL + " get pod -l app=velocity -o jsonpath='{.items[0].status.podIP}'"
                     ).trim();
-
-                    if (podIp.isEmpty())
-                        throw new RuntimeException("IP Velocity introuvable");
 
                     String podName = ShellExecutor.runAndGet(
-                            KUBECTL + " get pod -l app=" + name +
-                                    " -o jsonpath='{.items[0].metadata.name}'"
+                            KUBECTL + " get pod -l app=velocity -o jsonpath='{.items[0].metadata.name}'"
                     ).trim();
 
-                    // Insérer en BDD
-                    try (Connection conn = DriverManager.getConnection(
-                            "jdbc:mysql://" + dbHost + "/" + dbName, dbUser, dbPass);
+                    if (podIp.isEmpty()) throw new RuntimeException("IP Velocity introuvable.");
+
+                    // Insert BDD
+                    try (Connection conn = MySQLPool.get();
                          PreparedStatement insert = conn.prepareStatement(
-                                 "INSERT INTO servers " +
-                                         "(server_name, server_type, port, max_slots, available_slots, status, restricted, ip, k3s_server_name, created_at) " +
-                                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())")) {
+                                 "INSERT INTO servers (server_name, server_type, port, max_slots, available_slots, status, restricted, ip, k3s_server_name, created_at) " +
+                                         "VALUES (?, 'PROXY', ?, 500, 500, 'ONLINE', false, ?, ?, NOW())")) {
 
                         insert.setString(1, name);
-                        insert.setString(2, "PROXY");
-                        insert.setInt(3, port);
-                        insert.setInt(4, 100);
-                        insert.setInt(5, 100);
-                        insert.setString(6, "ONLINE");
-                        insert.setBoolean(7, false);
-                        insert.setString(8, podIp);
-                        insert.setString(9, podName);
-
+                        insert.setInt(2, port);
+                        insert.setString(3, podIp);
+                        insert.setString(4, podName);
                         insert.executeUpdate();
                     }
 
-                    System.out.println("[Deploy-Network] ✅ Velocity déployé et enregistré.");
+                    System.out.println("[Deploy-Network] ✅ Velocity déployé.");
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
 
                 } catch (Exception e) {
                     e.printStackTrace();
                     channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
                 }
+
             }, consumerTag -> {});
         } catch (Exception e) {
             e.printStackTrace();
